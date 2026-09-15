@@ -130,6 +130,7 @@ static char *motd_string = NULL;
 static char *hurl_string = NULL;
 
 static int Debug = 0;
+static int AnswerDelay = 0;
 static int CheckPoolSyntax = 0;
 
 /* Synchronous mode */
@@ -770,6 +771,12 @@ processPADI(Interface *ethif, PPPoEPacket *packet, int len)
 	plen += ntohs(hostUniq.length) + TAG_HDR_SIZE;
     }
     pado.length = htons(plen);
+
+    /* Delay PADO if specified (in ms) */
+    if (AnswerDelay) {
+	usleep(AnswerDelay * 1000);
+    }
+
     sendPacket(NULL, sock, &pado, (int) (plen + HDR_SIZE));
 }
 
@@ -1156,6 +1163,7 @@ usage(char const *argv0)
     fprintf(stderr, "   -N num         -- Allow 'num' concurrent sessions.\n");
     fprintf(stderr, "   -o offset      -- Assign session numbers starting at offset+1.\n");
     fprintf(stderr, "   -f disc:sess   -- Set Ethernet frame types (hex).\n");
+    fprintf(stderr, "   -w msec        -- Wait this time before answering to client.\n");
     fprintf(stderr, "   -s             -- Use synchronous PPP mode.\n");
     fprintf(stderr, "   -X pidfile     -- Write PID and lock pidfile.\n");
     fprintf(stderr, "   -q /path/pppd  -- Specify full path to pppd.\n");
@@ -1209,7 +1217,7 @@ main(int argc, char **argv)
     char const *s;
     int cookie_ok = 0;
 
-    char const *options = "X:ix:hI:C:L:R:T:m:FN:f:O:o:skp:lrudPS:q:Q:H:M:U:g:";
+    char const *options = "X:ix:hI:C:L:R:T:m:FN:f:O:o:skp:lrudPS:q:Q:H:M:U:g:w:";
 
     if (getuid() != geteuid() ||
 	getgid() != getegid()) {
@@ -1363,6 +1371,18 @@ main(int argc, char **argv)
 	    snprintf(PppoeOptions + strlen(PppoeOptions),
 		     SMALLBUF-strlen(PppoeOptions),
 		     " -%c %s", opt, optarg);
+	    break;
+
+	case 'w':
+	    if (sscanf(optarg, "%d", &opt) != 1) {
+		usage(argv[0]);
+		exit(EXIT_FAILURE);
+	    }
+	    if (opt <= 0) {
+		fprintf(stderr, "-w: Value must be positive\n");
+		exit(EXIT_FAILURE);
+	    }
+	    AnswerDelay = opt;
 	    break;
 
 	case 'F':

@@ -201,6 +201,11 @@ The \fB-U\fR option creates a UNIX socket which can be connected to in order to
 manage pppoe-server at run-time.  Please refer to the \fBCONTROL-SOCKET\fR
 section below for more detailed instructions.
 
+.TP
+.B \-w \fItime\fR
+Wait this many milliseconds before responding (acting as backup),
+causing the client to prefer the faster server on the same network.
+
 .SH OPERATION
 
 \fBpppoe-server\fR listens for incoming PPPoE discovery packets.  When
