@@ -47,8 +47,5 @@ typedef struct Tr101PiaVendorOptionStruct {
 	unsigned char	Data;
 } Tr101PiaVendorOption;
 
-
 void	initTr101Pia(Tr101PiaTags *pia);
-void 	printTr101Pia(Tr101PiaTags *pia);
 int 	processTr101Pia(Tr101PiaTags *pia,void *data, int len);
-

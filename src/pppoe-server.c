@@ -26,7 +26,6 @@
 
 #include <syslog.h>
 #include <errno.h>
-#define  __USE_GNU
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>

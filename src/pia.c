@@ -35,45 +35,12 @@ void	initTr101Pia(Tr101PiaTags *pia)
 	memset(pia->AccessLoopEncapsulation,0,sizeof(pia->AccessLoopEncapsulation));
 }
 
-void printTr101Pia(Tr101PiaTags *pia)
-{
-	char 	mybuffer[512];
-
-	sprintf(mybuffer,"\tCircuitId:%s\n \
-	RemoteId:%s\n \
-	DataRateUpstream:%ld\n \
-	DataRateDownstream:%ld\n \
-	MinDataRateUpstream:%ld\n \
-	MinDataRateDownstream:%ld\n \
-	AttainDataRateUpstream:%ld\n \
-	AttainDataRateDownstream:%ld\n \
-	MaxDataRateUpstream:%ld\n \
-	MaxDataRateDownstream:%ld\n \
-	LowPowerMinDataRateUpstream:%ld\n \
-	LowPowerMinDataRateDownstream:%ld\n \
-	MaxInterleaveDelayUpstream:%ld\n \
-	ActualInterleaveDelayUpstream:%ld\n \
-	MaxInterleaveDelayDownstream:%ld\n \
-	ActualInterleaveDelayDownstream:%ld\n \
-	AccessLoopEncapsulation:%x %x %x\n",
-	pia->CircuitId,pia->RemoteId,pia->DataRateUpstream,pia->DataRateDownstream,
-	pia->MinDataRateUpstream,pia->MinDataRateDownstream,pia->AttainDataRateUpstream,
-	pia->AttainDataRateDownstream,pia->MaxDataRateUpstream,pia->MaxDataRateDownstream,
-	pia->LowPowerMinDataRateUpstream,pia->LowPowerMinDataRateDownstream,
-	pia->MaxInterleaveDelayUpstream,pia->ActualInterleaveDelayUpstream,
-	pia->MaxInterleaveDelayDownstream,pia->ActualInterleaveDelayDownstream,
-	pia->AccessLoopEncapsulation[0],pia->AccessLoopEncapsulation[1],pia->AccessLoopEncapsulation[2]);
-
-	syslog(LOG_WARNING, mybuffer);
-}
 int processTr101Pia(Tr101PiaTags *pia,void *data, int len)
 {
-
 	int			processedLen, tagsize;
 	long int		value;
 
 	Tr101PiaVendorOption	*opts;
-
 
 	initTr101Pia(pia);
 
@@ -83,7 +50,6 @@ int processTr101Pia(Tr101PiaTags *pia,void *data, int len)
 	Step thru the data packet picking out all sub tags
 */
 while(processedLen < len )	{
-
 
 	memcpy(&value, &opts->Data,4);
 	value=ntohl(value);
@@ -164,5 +130,3 @@ while(processedLen < len )	{
 	}
 	return 0;
 }
-
-
