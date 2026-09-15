@@ -26,6 +26,7 @@
 
 #include <syslog.h>
 #include <errno.h>
+#define  __USE_GNU
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -43,6 +44,7 @@
 #include "md5.h"
 #include "control_socket.h"
 
+#include "pia.h"
 
 #if defined(HAVE_LINUX_IF_H)
 #include <linux/if.h>
@@ -177,6 +179,8 @@ static PPPoETag hostUniq;
 static PPPoETag relayId;
 static PPPoETag receivedCookie;
 static PPPoETag requestedService;
+static Tr101PiaTags pia;
+
 
 #define HOSTNAMELEN 256
 
@@ -466,6 +470,12 @@ parsePADITags(uint16_t type, uint16_t len, unsigned char *data,
 	hostUniq.length = htons(len);
 	memcpy(hostUniq.payload, data, len);
 	break;
+    case TAG_VENDOR_SPECIFIC:
+        if( ntohl( *((unsigned long *)data)) == VENDOR_ADSLFORUM )
+        {
+          processTr101Pia(&pia,data+4,len-4);
+        }
+	break;
     }
 }
 
@@ -515,6 +525,13 @@ parsePADRTags(uint16_t type, uint16_t len, unsigned char *data,
 	requestedService.length = htons(len);
 	memcpy(requestedService.payload, data, len);
 	break;
+    case TAG_VENDOR_SPECIFIC:
+        if( ntohl( *((unsigned long *)data)) == VENDOR_ADSLFORUM )
+        {
+          processTr101Pia(&pia,data+4,len-4);
+        }
+	break;
+
     }
 }
 
@@ -669,6 +686,43 @@ processPADI(Interface *ethif, PPPoEPacket *packet, int len)
 
     parsePacket(packet, parsePADITags, NULL);
 
+    /* If pppoe agent information is allowed but ignored, clear any received
+       info and skip the processing here */
+    if ( ethif->flags & FLAG_IF_PIA_IGNORE ) {
+    initTr101Pia(&pia);
+    }
+    else {
+
+    /* Ignore PADI's that are tagged with pppoe intermediate agent info if not allowed */
+    if ( ethif->flags & FLAG_IF_PIA_REQUIRED) {
+          if( strlen(pia.CircuitId) == 0 ) {
+          syslog(LOG_INFO,"PADI: PPPoE Intermediate Agent required but not supplied on int %s, CircuitId %s RemoteId %s client %02x:%02x:%02x:%02x:%02x:%02x\n",
+                   ethif->name,
+		   strlen(pia.CircuitId) > 0 ? pia.CircuitId : "-",
+		   strlen(pia.RemoteId) > 0 ? pia.RemoteId : "-",
+                   packet->ethHdr.h_source[0],
+                   packet->ethHdr.h_source[1],
+                   packet->ethHdr.h_source[2],
+                   packet->ethHdr.h_source[3],
+                   packet->ethHdr.h_source[4],
+                   packet->ethHdr.h_source[5]);
+          return; }
+        } else if ( ! (ethif->flags & FLAG_IF_PIA_OPTIONAL )) {
+          if( strlen(pia.CircuitId) > 0 ) {
+          syslog(LOG_INFO,"PADI: PPPoE Intermediate Agent not allowed but supplied on int %s, CircuitId %s RemoteId %s client %02x:%02x:%02x:%02x:%02x:%02x\n",
+                   ethif->name,
+		   strlen(pia.CircuitId) > 0 ? pia.CircuitId : "-",
+                   strlen(pia.RemoteId) > 0 ? pia.RemoteId : "-",
+                   packet->ethHdr.h_source[0],
+                   packet->ethHdr.h_source[1],
+                   packet->ethHdr.h_source[2],
+                   packet->ethHdr.h_source[3],
+                   packet->ethHdr.h_source[4],
+                   packet->ethHdr.h_source[5]);
+          return; }
+      }
+    }
+
     /* If PADI specified non-default service name, and we do not offer
        that service, DO NOT send PADO */
     if (requestedService.type) {
@@ -810,7 +864,6 @@ processPADT(Interface *ethif, PPPoEPacket *packet, int len)
 	return;
     }
 
-
     /* If source MAC does not match, do not kill session */
     if (memcmp(packet->ethHdr.h_source, Sessions[i].eth, ETH_ALEN)) {
         if (!Sessions[i].eth[0] &&
@@ -888,6 +941,7 @@ processPADR(Interface *ethif, PPPoEPacket *packet, int len)
     hostUniq.type = 0;
     receivedCookie.type = 0;
     requestedService.type = 0;
+    initTr101Pia(&pia);
 
     /* Ignore PADR's not directed at us */
     if (memcmp(packet->ethHdr.h_dest, myAddr, ETH_ALEN)) return;
@@ -917,7 +971,51 @@ processPADR(Interface *ethif, PPPoEPacket *packet, int len)
     max_ppp_payload = 0;
     parsePacket(packet, parsePADRTags, NULL);
 
-    /* Check that everything's cool */
+    /* Check that everything's cool
+
+    If we're to ignore pppoe agent information, then clear the buffer
+    and skip the below.
+
+    */
+
+    if ( ethif->flags & FLAG_IF_PIA_IGNORE ) {
+    initTr101Pia(&pia);
+    }
+    else {
+    /* Security - enforce that if agent info not allowed, or that if it
+       is allowed but required and not present, that we don't start
+       this session. Technically - this shouldn't be seen because we
+       perform this duing PADI, however, some equipment may not insert
+       agent info at padi time so we get to do this again here. Also
+       it could be an attack, so either way, all transactions,
+       check it */
+    if ( ethif->flags & FLAG_IF_PIA_REQUIRED) {
+      if( strlen(pia.CircuitId) == 0 ) {
+        syslog(LOG_INFO,"PADR: PPPoE Intermediate Agent required but not supplied on int %s, client %02x:%02x:%02x:%02x:%02x:%02x\n",
+		   ethif->name,
+		   packet->ethHdr.h_source[0],
+		   packet->ethHdr.h_source[1],
+		   packet->ethHdr.h_source[2],
+		   packet->ethHdr.h_source[3],
+		   packet->ethHdr.h_source[4],
+		   packet->ethHdr.h_source[5]);
+          return; }
+        } else if ( ! (ethif->flags & FLAG_IF_PIA_OPTIONAL )) {
+        if( strlen(pia.CircuitId) > 0 ) {
+        syslog(LOG_INFO,"PADR: PPPoE Intermediate Agent not allowed but supplied on int %s, CircuitId %s RemoteId %s client %02x:%02x:%02x:%02x:%02x:%02x\n",
+		   ethif->name,
+		   strlen(pia.CircuitId) > 0 ? pia.CircuitId : "-",
+                   strlen(pia.RemoteId) > 0 ? pia.RemoteId : "-",
+		   packet->ethHdr.h_source[0],
+		   packet->ethHdr.h_source[1],
+		   packet->ethHdr.h_source[2],
+		   packet->ethHdr.h_source[3],
+		   packet->ethHdr.h_source[4],
+		   packet->ethHdr.h_source[5]);
+          return; }
+          }
+      }
+
     if (!receivedCookie.type) {
 	/* Drop it -- do not send error PADS */
 	return;
@@ -1148,8 +1246,9 @@ usage(char const *argv0)
 {
     fprintf(stderr, "Usage: %s [options]\n", argv0);
     fprintf(stderr, "Options:\n");
-    fprintf(stderr, "   -I if_name     -- Specify interface (default %s.)\n",
+    fprintf(stderr, "   -I ([o|i|r|f]:)if_name     -- Specify pia flages and interface (default %s)\n",
 	    DEFAULT_IF);
+    fprintf(stderr, "   pia flags - o:optional, i:ignore, r:required, f:forbid connections with pia, default:optional\n\n");
     fprintf(stderr, "   -T timeout     -- Specify inactivity timeout in seconds.\n");
     fprintf(stderr, "   -C name        -- Set access concentrator name.\n");
     fprintf(stderr, "   -m MSS         -- Clamp incoming and outgoing MSS options.\n");
@@ -1188,6 +1287,7 @@ usage(char const *argv0)
     fprintf(stderr, "under the terms of the GNU General Public License, version 2\n");
     fprintf(stderr, "or (at your option) any later version.\n");
     fprintf(stderr, "https://dianne.skoll.ca/projects/rp-pppoe/\n");
+    fprintf(stderr, "PPPoE Intermediate Agrent support courtesy Insane Laughing Clown\n");
 }
 
 /**********************************************************************
@@ -1216,6 +1316,8 @@ main(int argc, char **argv)
     char c;
     char const *s;
     int cookie_ok = 0;
+    char ifnam[IFNAMSIZ];
+    int piaflags;
 
     char const *options = "X:ix:hI:C:L:R:T:m:FN:f:O:o:skp:lrudPS:q:Q:H:M:U:g:w:";
 
@@ -1428,15 +1530,35 @@ main(int argc, char **argv)
 		}
 	    }
 	    found = 0;
+            piaflags=0;
+            if ( strlen(optarg)>2 ) {
+              if ( optarg[1]==':' ) {
+                switch(optarg[0]) {
+                  case 'o' : piaflags = FLAG_IF_PIA_OPTIONAL;
+                    break;
+                   case 'r' : piaflags = FLAG_IF_PIA_OPTIONAL | FLAG_IF_PIA_REQUIRED;
+                     break;
+                   case 'i' : piaflags = FLAG_IF_PIA_IGNORE;
+                     break;
+                   case 'f' :
+                     break;
+                 }
+                 strcpy(ifnam,optarg+2);
+               } else {
+                 piaflags = FLAG_IF_PIA_OPTIONAL;
+                 strcpy(ifnam,optarg);
+               }
+            }
 	    for (i=0; i<NumInterfaces; i++) {
-		if (!strncmp(interfaces[i].name, optarg, IFNAMSIZ)) {
+		if (!strncmp(interfaces[i].name, ifnam, IFNAMSIZ)) {
 		    found = 1;
 		    break;
 		}
 	    }
 	    if (!found) {
 		memset(&interfaces[NumInterfaces], 0, sizeof(*interfaces));
-		strncpy(interfaces[NumInterfaces].name, optarg, IFNAMSIZ);
+		strncpy(interfaces[NumInterfaces].name, ifnam, IFNAMSIZ);
+		interfaces[NumInterfaces].flags=piaflags;
 		NumInterfaces++;
 	    }
 	    break;
@@ -1935,14 +2057,19 @@ startPPPD(ClientSession *session)
     char *mrumtu;
     int c = 0;
 
+    int avsize;
+    char avbuffer[512],*ptr;
+
     syslog(LOG_INFO,
-	   "Session %u created for client %02x:%02x:%02x:%02x:%02x:%02x (%d.%d.%d.%d) on %s using Service-Name '%s'",
+	   "Session %u created for client %02x:%02x:%02x:%02x:%02x:%02x (%d.%d.%d.%d) on %s, CircuitId '%s' RemoteId '%s' using Service-Name '%s'",
 	   (unsigned int) ntohs(session->sess),
 	   session->eth[0], session->eth[1], session->eth[2],
 	   session->eth[3], session->eth[4], session->eth[5],
 	   (int) session->peerip[0], (int) session->peerip[1],
 	   (int) session->peerip[2], (int) session->peerip[3],
 	   session->ethif->name,
+	   pia.CircuitId,
+	   pia.RemoteId,
 	   session->serviceName);
 
     argv[c++] = "pppd";
@@ -2038,6 +2165,92 @@ startPPPD(ClientSession *session)
 	argv[c++] = "mtu";
 	argv[c++] = "1492";
     }
+
+    /* potentially lots of avpairs here */
+    ptr = avbuffer;
+    *ptr=0;
+
+
+    /* Security: Unless there is a 'CircuitId' present, we skip all the rest */
+    if( strlen(pia.CircuitId) >0 )
+    {
+
+        avsize=sprintf(ptr,"ADSL-Agent-Circuit-Id=\"%s\"",pia.CircuitId);
+        argv[c++] = "avpair";
+        argv[c++] = ptr++;
+        ptr+=avsize;
+
+    if( strlen(pia.RemoteId) >0 )
+    {
+        avsize=sprintf(ptr,"ADSL-Agent-Remote-Id=\"%s\"",pia.RemoteId);
+        argv[c++] = "avpair";
+        argv[c++] = ptr++;
+        ptr+=avsize;
+    }
+
+    if( pia.DataRateUpstream != -1 ) {
+        avsize=sprintf(ptr,"Actual-Data-Rate-Upstream=\"%ld\"",pia.DataRateUpstream);
+        argv[c++] = "avpair";
+        argv[c++] = ptr++;
+        ptr+=avsize;
+    }
+
+    if (pia.DataRateDownstream != -1 ) {
+    avsize=sprintf(ptr,"Actual-Data-Rate-Downstream=\"%ld\"",pia.DataRateDownstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+
+    if (pia.MinDataRateUpstream != -1 ) {
+    avsize=sprintf(ptr,"Minimum-Data-Rate-Upstream=\"%ld\"",pia.MinDataRateUpstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+
+    if (pia.MinDataRateDownstream != -1 ) {
+    avsize=sprintf(ptr,"Minimum-Data-Rate-Downstream=\"%ld\"",pia.MinDataRateDownstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+
+    if (pia.AttainDataRateUpstream != -1 ) {
+    avsize=sprintf(ptr,"Attainable-Data-Rate-Upstream=\"%ld\"",pia.AttainDataRateUpstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+
+
+    if (pia.AttainDataRateDownstream != -1 ) {
+    avsize=sprintf(ptr,"Attainable-Data-Rate-Downstream=\"%ld\"",pia.AttainDataRateDownstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+
+    if (pia.MaxDataRateUpstream != -1 ) {
+    avsize=sprintf(ptr,"Maximum-Data-Rate-Upstream=\"%ld\"",pia.MaxDataRateUpstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+
+
+    if (pia.MaxDataRateDownstream != -1 ) {
+    avsize=sprintf(ptr,"Maximum-Data-Rate-Downstream=\"%ld\"",pia.MaxDataRateDownstream);
+    argv[c++] = "avpair";
+    argv[c++] = ptr++;
+    ptr+=avsize;
+    }
+    }
+    /* Current issues with radius client prevent the remainder from enumerated */
+
+
+
+
     argv[c++] = NULL;
     execv(pppd_path, argv);
     exit(EXIT_FAILURE);

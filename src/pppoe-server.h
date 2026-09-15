@@ -34,7 +34,13 @@ typedef struct {
     unsigned char mac[ETH_ALEN]; /* MAC address */
     EventHandler *eh;		/* Event handler for this interface */
     uint16_t mtu;               /* MTU of interface */
+    unsigned long        flags;          /* Flags associated with this interface */
 } Interface;
+
+/* Binary flags on the interface */
+#define FLAG_IF_PIA_OPTIONAL   1       /* PPPoE Agent tags optional but passed on if present */
+#define FLAG_IF_PIA_REQUIRED   2       /* PPPoE Agent tags required and drop session if not present */
+#define FLAG_IF_PIA_IGNORE     4       /* PPPoe Agent tags allowed but not passed on */
 
 #define FLAG_RECVD_PADT      1
 #define FLAG_USER_SET        2

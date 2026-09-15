@@ -75,6 +75,9 @@ extern void dropPrivs(void);
 #define TAG_MOTM               0x112
 #define TAG_IP_ROUTE_ADD       0x121
 
+/* defines for PPPoE Intermediate Agent support, as described in  TR-101 */
+#define VENDOR_ADSLFORUM 0x00000DE9
+
 /* Discovery phase states */
 #define STATE_SENT_PADI     0
 #define STATE_RECEIVED_PADO 1
